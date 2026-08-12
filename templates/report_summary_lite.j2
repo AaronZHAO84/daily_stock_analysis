@@ -1,0 +1,59 @@
+{% from '_macros.j2' import market_snapshot with context %}
+# 🎯 {{ report_date }} {{ labels.dashboard_title }}
+
+> {{ labels.analyzed_prefix }} **{{ results|length }}** {{ labels.stock_unit }} | 🟢{{ labels.buy_label }}:{{ buy_count }} 🟡{{ labels.watch_label }}:{{ hold_count }} 🔴{{ labels.sell_label }}:{{ sell_count }}
+{% if market_status_line %}
+{{ market_status_line }}
+{% endif %}
+
+## 📊 {{ labels.summary_heading }}
+
+{% for e in enriched %}
+{{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})**: {{ e.signal_text }} | {{ labels.score_label }} {{ e.result.sentiment_score }} | {{ e.localized_trend_prediction }}
+{% endfor %}
+
+---
+
+{% for e in enriched %}
+{% set result = e.result %}
+{% set dashboard = result.dashboard if result.dashboard else {} %}
+{% set intel = dashboard.get('intelligence') or {} %}
+## {{ e.signal_emoji }} {{ e.stock_name }} ({{ result.code }})
+
+### 📰 {{ labels.info_heading }}
+
+{% if intel.get('sentiment_summary') %}
+**💭 {{ labels.sentiment_summary_label }}**: {{ intel.sentiment_summary }}
+{% endif %}
+{% if intel.get('earnings_outlook') %}
+**📊 {{ labels.earnings_outlook_label }}**: {{ intel.earnings_outlook }}
+{% endif %}
+{% if intel.get('risk_alerts') %}
+
+**🚨 {{ labels.risk_alerts_label }}**:
+{% for alert in intel.risk_alerts[:2] %}
+- {{ alert }}
+{% endfor %}
+{% endif %}
+{% if intel.get('positive_catalysts') %}
+
+**✨ {{ labels.positive_catalysts_label }}**:
+{% for cat in intel.positive_catalysts[:2] %}
+- {{ cat }}
+{% endfor %}
+{% endif %}
+{% if intel.get('latest_news') %}
+
+**📢 {{ labels.latest_news_label }}**: {{ intel.latest_news }}
+{% endif %}
+{% if not intel %}
+{{ result.analysis_summary }}
+{% endif %}
+
+---
+
+{% endfor %}
+*{{ labels.generated_at_label }}：{{ report_timestamp }}*
+{% if show_llm_model and models_used %}
+*{{ labels.analysis_model_label }}：{{ models_used|join(', ') }}*
+{% endif %}

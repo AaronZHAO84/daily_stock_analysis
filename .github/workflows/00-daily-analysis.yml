@@ -15,6 +15,7 @@ on:
         type: choice
         options:
           - full          # 完整分析（股票+大盘）
+          - summary-lite  # 摘要速览（整体摘要 + 每股重要信息速览）
           - market-only   # 仅大盘复盘
           - stocks-only   # 仅股票分析
       force_run:
@@ -406,7 +407,7 @@ jobs:
           # ==========================================
           # 运行配置 ⬅️ 新增！
           # ==========================================
-          REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
+          REPORT_TYPE: ${{ github.event.inputs.mode == 'summary-lite' && 'summary_lite' || github.event.inputs.mode == 'full' && 'full' || vars.DAILY_ANALYSIS_MODE == 'summary-lite' && 'summary_lite' || vars.DAILY_ANALYSIS_MODE == 'full' && 'full' || vars.REPORT_TYPE || secrets.REPORT_TYPE || 'summary_lite' }}
           REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || '' }}
           REPORT_SHOW_LLM_MODEL: ${{ vars.REPORT_SHOW_LLM_MODEL || secrets.REPORT_SHOW_LLM_MODEL || 'true' }}
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
@@ -448,7 +449,7 @@ jobs:
           fi
 
           # 判断运行模式
-          MODE="${{ github.event.inputs.mode || 'full' }}"
+          MODE="${{ github.event.inputs.mode || vars.DAILY_ANALYSIS_MODE || 'summary-lite' }}"
           
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"
@@ -528,6 +529,8 @@ jobs:
           # 执行分析
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
+          elif [ "$MODE" = "summary-lite" ]; then
+            python main.py --no-market-review $FORCE_RUN_ARG
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review $FORCE_RUN_ARG
           else

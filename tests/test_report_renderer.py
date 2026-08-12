@@ -82,6 +82,35 @@ class TestReportRenderer(unittest.TestCase):
         self.assertIn("买入", out)
         self.assertIn("🟢买入:1", out)
 
+    def test_render_summary_lite_includes_intel_brief_without_detail_sections(self) -> None:
+        r = _make_result(
+            code="AAPL",
+            name="Apple",
+            operation_advice="Hold",
+            report_language="en",
+            dashboard={
+                "intelligence": {
+                    "sentiment_summary": "Sentiment is neutral positive.",
+                    "earnings_outlook": "Earnings visibility is stable.",
+                    "risk_alerts": ["Supply chain risk", "Valuation risk", "Ignored third risk"],
+                    "positive_catalysts": ["AI product cycle", "Cloud demand", "Ignored third catalyst"],
+                    "latest_news": "Latest product update.",
+                },
+            },
+        )
+
+        out = render("summary_lite", [r], summary_only=False)
+
+        self.assertIsNotNone(out)
+        self.assertIn("Apple(AAPL)", out)
+        self.assertIn("Sentiment is neutral positive.", out)
+        self.assertIn("Supply chain risk", out)
+        self.assertIn("Valuation risk", out)
+        self.assertNotIn("Ignored third risk", out)
+        self.assertIn("AI product cycle", out)
+        self.assertNotIn("Ignored third catalyst", out)
+        self.assertNotIn("battle plan", out.lower())
+
     def test_render_markdown_preserves_guardrailed_neutral_action(self) -> None:
         r = _make_result(
             dashboard={
