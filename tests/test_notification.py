@@ -827,7 +827,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
 
         self.assertEqual(mock_dashboard.call_count, 3)
         mock_brief.assert_called_once()
-        self.assertEqual(mock_summary_lite.call_count, 2)
+        self.assertEqual(mock_summary_lite.call_count, 3)
 
     @mock.patch("src.notification.get_config")
     def test_generate_single_stock_report_keeps_legacy_simple_format(self, mock_get_config: mock.MagicMock):
