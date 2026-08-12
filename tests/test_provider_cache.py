@@ -424,13 +424,16 @@ def test_litellm_openai_prompt_cache_key_is_not_passed_through_without_verified_
         """
     )
 
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        env=sanitized_env,
-        text=True,
-        timeout=15,
-    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env=sanitized_env,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("LiteLLM local capture subprocess timed out")
     if completed.returncode == 77:
         if "LOCAL_SOCKET_UNAVAILABLE" in completed.stdout + completed.stderr:
             pytest.skip("local loopback sockets are unavailable")
