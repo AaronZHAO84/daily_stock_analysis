@@ -906,6 +906,7 @@ class Config:
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
     litellm_model: str = ""  # Primary model; must include provider prefix when set explicitly
     litellm_fallback_models: List[str] = field(default_factory=list)  # Cross-model fallback list
+    llm_batch_size: int = 3  # Same-market symbols per fast/summary-lite LLM request
 
     # Unified temperature for all LLM calls (LLM_TEMPERATURE); legacy per-provider temps are fallback only
     llm_temperature: float = 0.7
@@ -2133,6 +2134,7 @@ class Config:
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),
             max_workers=parse_env_int(os.getenv('MAX_WORKERS'), 3, field_name='MAX_WORKERS', minimum=1),
+            llm_batch_size=parse_env_int(os.getenv('LLM_BATCH_SIZE'), 3, field_name='LLM_BATCH_SIZE', minimum=1, maximum=10),
             debug=os.getenv('DEBUG', 'false').lower() == 'true',
             config_validate_mode=os.getenv('CONFIG_VALIDATE_MODE', 'warn').lower(),
             http_proxy=os.getenv('HTTP_PROXY'),
