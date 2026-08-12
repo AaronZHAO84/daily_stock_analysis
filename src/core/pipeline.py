@@ -618,7 +618,8 @@ class StockAnalysisPipeline:
                 intel_results = self.search_service.search_comprehensive_intel(
                     stock_code=code,
                     stock_name=stock_name,
-                    max_searches=2 if configured_report_type == "fast" else 5
+                    max_searches=1 if configured_report_type == "fast" else 5,
+                    allow_public_searxng=configured_report_type != "fast",
                 )
 
                 # 格式化情报报告
