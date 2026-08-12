@@ -30,7 +30,6 @@ from src.services.market_symbol_utils import is_suffix_market_symbol
 from src.services.run_diagnostics import record_provider_run, record_provider_run_started
 from .fundamental_adapter import AkshareFundamentalAdapter
 from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
-from .realtime_types import CircuitBreaker
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -628,11 +627,42 @@ class DataFetcherManager:
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
     }
-    _daily_source_health = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
     _CONCEPT_RANKINGS_CACHE_TTL_SECONDS = 300.0
     _CONCEPT_RANKINGS_EMPTY_CACHE_TTL_SECONDS = 30.0
     _concept_rankings_cache_lock = RLock()
     _concept_rankings_cache: Dict[int, Tuple[float, List[Dict], List[Dict]]] = {}
+    _daily_source_skip_lock = RLock()
+    _daily_sources_skipped_this_run: set[str] = set()
+
+    @classmethod
+    def reset_daily_source_health(cls) -> None:
+        """Clear the per-run daily-source skip list (used by tests/admin tools)."""
+        with cls._daily_source_skip_lock:
+            cls._daily_sources_skipped_this_run.clear()
+
+    @classmethod
+    def _daily_source_key(cls, fetcher: BaseFetcher, market: str) -> str:
+        return f"daily_data:{market}:{fetcher.name}"
+
+    @classmethod
+    def _should_attempt_daily_source(cls, fetcher: BaseFetcher, market: str) -> bool:
+        key = cls._daily_source_key(fetcher, market)
+        with cls._daily_source_skip_lock:
+            skipped = key in cls._daily_sources_skipped_this_run
+        if skipped:
+            logger.info(
+                "[数据源跳过] %s 日线源本轮已失败，不再重试: %s",
+                market,
+                fetcher.name,
+            )
+            return False
+        return True
+
+    @classmethod
+    def _skip_daily_source_after_failure(cls, fetcher: BaseFetcher, market: str) -> None:
+        key = cls._daily_source_key(fetcher, market)
+        with cls._daily_source_skip_lock:
+            cls._daily_sources_skipped_this_run.add(key)
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
         """
@@ -796,43 +826,6 @@ class DataFetcherManager:
             )
 
         return kept
-
-    @classmethod
-    def _daily_health_key(cls, fetcher: BaseFetcher, market: str) -> str:
-        return f"daily_data:{market}:{fetcher.name}"
-
-    @classmethod
-    def _is_daily_source_available(
-        cls,
-        fetcher: BaseFetcher,
-        market: str,
-    ) -> bool:
-        key = cls._daily_health_key(fetcher, market)
-        if cls._daily_source_health.is_available(key):
-            return True
-        logger.info(
-            "[数据源健康度] %s 日线跳过短期熔断的数据源: %s",
-            market,
-            fetcher.name,
-        )
-        return False
-
-    @staticmethod
-    def _daily_source_unavailable_error(fetcher: BaseFetcher) -> str:
-        return f"[{fetcher.name}] (CircuitOpen) 数据源短期熔断"
-
-    @classmethod
-    def _record_daily_source_success(cls, fetcher: BaseFetcher, market: str) -> None:
-        cls._daily_source_health.record_success(cls._daily_health_key(fetcher, market))
-
-    @classmethod
-    def _record_daily_source_failure(cls, fetcher: BaseFetcher, market: str, error: str) -> None:
-        cls._daily_source_health.record_failure(cls._daily_health_key(fetcher, market), error=error)
-
-    @classmethod
-    def reset_daily_source_health(cls) -> None:
-        """Reset daily source health state for tests/admin diagnostics."""
-        cls._daily_source_health.reset()
 
     def _get_cached_stock_name(self, stock_code: str) -> Optional[str]:
         self._ensure_concurrency_guards()
@@ -1326,8 +1319,8 @@ class DataFetcherManager:
                 for attempt, fetcher in enumerate(fetchers, start=1):
                     if fetcher.name != src_name:
                         continue
-                    if not self._is_daily_source_available(fetcher, market):
-                        errors.append(self._daily_source_unavailable_error(fetcher))
+                    if not self._should_attempt_daily_source(fetcher, market):
+                        errors.append(f"[{fetcher.name}] (SkippedAfterFailure) 本轮已跳过")
                         break
                     attempt_start = time.time()
                     try:
@@ -1364,7 +1357,6 @@ class DataFetcherManager:
                                 f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
                                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
                             )
-                            self._record_daily_source_success(fetcher, market)
                             return df, fetcher.name
                         duration_ms = int((time.time() - attempt_start) * 1000)
                         record_provider_run(
@@ -1378,8 +1370,7 @@ class DataFetcherManager:
                             fallback_to=fallback_to,
                             record_count=0,
                         )
-                        if df is not None and df.empty:
-                            self._record_daily_source_success(fetcher, market)
+                        self._skip_daily_source_after_failure(fetcher, market)
                     except Exception as e:
                         error_type, error_reason = summarize_exception(e)
                         error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1398,7 +1389,7 @@ class DataFetcherManager:
                             f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                             f"error_type={error_type}, reason={error_reason}"
                         )
-                        self._record_daily_source_failure(fetcher, market, error_reason)
+                        self._skip_daily_source_after_failure(fetcher, market)
                         errors.append(error_msg)
                     break
 
@@ -1408,8 +1399,8 @@ class DataFetcherManager:
             raise DataFetchError(error_summary)
 
         for attempt, fetcher in enumerate(fetchers, start=1):
-            if not self._is_daily_source_available(fetcher, market):
-                errors.append(self._daily_source_unavailable_error(fetcher))
+            if not self._should_attempt_daily_source(fetcher, market):
+                errors.append(f"[{fetcher.name}] (SkippedAfterFailure) 本轮已跳过")
                 continue
             attempt_start = time.time()
             fallback_to = fetchers[attempt].name if attempt < total_fetchers else None
@@ -1444,7 +1435,6 @@ class DataFetcherManager:
                         f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
                         f"rows={len(df)}, elapsed={elapsed:.2f}s"
                     )
-                    self._record_daily_source_success(fetcher, market)
                     return df, fetcher.name
                 duration_ms = int((time.time() - attempt_start) * 1000)
                 record_provider_run(
@@ -1458,9 +1448,7 @@ class DataFetcherManager:
                     fallback_to=fallback_to,
                     record_count=0,
                 )
-                if df is not None and df.empty:
-                    self._record_daily_source_success(fetcher, market)
-
+                self._skip_daily_source_after_failure(fetcher, market)
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
                 error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1479,7 +1467,7 @@ class DataFetcherManager:
                     f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                     f"error_type={error_type}, reason={error_reason}"
                 )
-                self._record_daily_source_failure(fetcher, market, error_reason)
+                self._skip_daily_source_after_failure(fetcher, market)
                 errors.append(error_msg)
                 if attempt < total_fetchers:
                     next_fetcher = fetchers[attempt]
