@@ -4674,6 +4674,26 @@ This run only needs the aggregate summary plus each stock's short intelligence b
             ) from exc
 
         self._validate_analysis_minimal_contract(data)
+
+    def _validate_batch_json_response(self, text: str) -> None:
+        """Validate the envelope used by same-market batched analysis."""
+        try:
+            _json_str, data = self._extract_analysis_json_object(text)
+            stocks = data.get("stocks")
+            if not isinstance(stocks, list) or not stocks:
+                raise ValueError("stocks must be a non-empty array")
+            for item in stocks:
+                if not isinstance(item, dict) or not str(item.get("code") or "").strip():
+                    raise ValueError("every stock item must include code")
+                self._validate_analysis_minimal_contract(item)
+        except GenerationError:
+            raise
+        except Exception as exc:
+            raise self._generation_validation_error(
+                GenerationErrorCode.INVALID_JSON,
+                reason="invalid_batch_json",
+                message=str(exc)[:200],
+            ) from exc
     
     def _parse_text_response(
         self, 
@@ -4795,35 +4815,38 @@ This run only needs the aggregate summary plus each stock's short intelligence b
 
         config = self._get_runtime_config()
         language = normalize_report_language(getattr(config, "report_language", "zh"))
-        sections = []
+        stock_inputs = []
         for context in contexts:
             code = context.get("code", "Unknown")
             name = context.get("stock_name") or STOCK_NAME_MAP.get(code, f"股票{code}")
-            prompt = self._format_prompt(
-                context,
-                name,
-                (news_contexts or {}).get(code),
-                report_language=language,
-                analysis_context_pack_summary=(analysis_context_pack_summaries or {}).get(code),
+            stock_inputs.append(
+                self._build_fast_batch_stock_input(
+                    context,
+                    name,
+                    (news_contexts or {}).get(code),
+                    (analysis_context_pack_summaries or {}).get(code),
+                )
             )
-            sections.append(f"### STOCK {code} ({name})\n{prompt}")
 
         batch_prompt = (
-            "You are analyzing a same-market stock batch. Return JSON only, with "
-            "the exact shape {\"stocks\":[{...single-stock-analysis-fields...}]} . "
-            "Return exactly one object for every requested code; preserve each "
-            "code in the code field and do not merge stocks.\n\n"
-            + "\n\n".join(sections)
+            "按同一市场的股票数据生成简短分析。只返回 JSON，不要 Markdown。"
+            "格式必须为 {\"stocks\":[...]}；每只股票必须有 code、sentiment_score、"
+            "trend_prediction、operation_advice、analysis_summary。analysis_summary 不超过120字；"
+            "仅列真正重要的风险、利好或动态，没有则留空数组。\n"
+            + json.dumps(stock_inputs, ensure_ascii=False, default=str)
         )
         result = self._call_litellm(
             batch_prompt,
-            {"temperature": config.llm_temperature, "max_output_tokens": 8192 * len(contexts)},
-            system_prompt=self._get_analysis_system_prompt(language, stock_code="batch"),
+            {
+                "temperature": config.llm_temperature,
+                "max_output_tokens": min(4096, max(1200, 900 * len(contexts))),
+            },
+            system_prompt="You are a concise stock-analysis assistant. Return valid JSON only.",
             stream=False,
-            response_validator=self._validate_json_response,
+            response_validator=self._validate_batch_json_response,
         )
         response_text = result[0] if isinstance(result, tuple) else result
-        data = json.loads(response_text)
+        _json_str, data = self._extract_analysis_json_object(response_text)
         items = data.get("stocks") if isinstance(data, dict) else None
         if not isinstance(items, list):
             raise ValueError("batch LLM response must contain a stocks array")
@@ -4844,6 +4867,35 @@ This run only needs the aggregate summary plus each stock's short intelligence b
             parsed.report_language = language
             results.append(parsed)
         return results
+
+    @staticmethod
+    def _build_fast_batch_stock_input(
+        context: Dict[str, Any],
+        name: str,
+        news_context: Optional[str],
+        pack_summary: Optional[str],
+    ) -> Dict[str, Any]:
+        """Keep batch prompts short enough to be materially faster than single calls."""
+        today = context.get("today") if isinstance(context.get("today"), dict) else {}
+        realtime = context.get("realtime") if isinstance(context.get("realtime"), dict) else {}
+        return {
+            "code": str(context.get("code") or ""),
+            "name": name,
+            "market": context.get("market") or context.get("market_type"),
+            "date": context.get("date"),
+            "quote": {
+                "close": today.get("close"),
+                "pct_chg": context.get("price_change_ratio", realtime.get("change_pct")),
+                "volume_ratio": realtime.get("volume_ratio"),
+                "turnover_rate": realtime.get("turnover_rate"),
+            },
+            "technical": {
+                "ma_status": context.get("ma_status"),
+                "trend": context.get("trend_status") or context.get("trend_analysis"),
+                "signal_score": context.get("signal_score"),
+            },
+            "important_information": (news_context or pack_summary or "")[:1200],
+        }
 
 
 # 便捷函数
