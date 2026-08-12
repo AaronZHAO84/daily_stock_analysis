@@ -3149,12 +3149,15 @@ class StockAnalysisPipeline:
             analyze_kwargs = {"query_id": effective_query_id}
             if current_time is not None:
                 analyze_kwargs["current_time"] = current_time
-            result = self.analyze_stock(
-                code,
-                report_type,
-                analysis_runner=analysis_runner,
-                **analyze_kwargs,
-            )
+            if analysis_runner is None:
+                result = self.analyze_stock(code, report_type, **analyze_kwargs)
+            else:
+                result = self.analyze_stock(
+                    code,
+                    report_type,
+                    analysis_runner=analysis_runner,
+                    **analyze_kwargs,
+                )
             
             if result and result.success:
                 logger.info(
@@ -3320,17 +3323,21 @@ class StockAnalysisPipeline:
         # 使用线程池并发处理
         # 注意：max_workers 设置较低（默认3）以避免触发反爬
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            submit_kwargs = {
+                "skip_analysis": dry_run,
+                "single_stock_notify": False,
+                "analysis_query_id": uuid.uuid4().hex,
+                "current_time": resume_reference_time,
+            }
+            if batch_coordinator is not None:
+                submit_kwargs["analysis_runner"] = _analysis_runner
             # 提交任务
             future_to_code = {
                 executor.submit(
                     self.process_single_stock,
                     code,
-                    skip_analysis=dry_run,
-                    single_stock_notify=False,
+                    **submit_kwargs,
                     report_type=report_type,  # Issue #119: 传递报告类型
-                    analysis_query_id=uuid.uuid4().hex,
-                    current_time=resume_reference_time,
-                    analysis_runner=_analysis_runner if batch_coordinator is not None else None,
                 ): code
                 for code in stock_codes
             }
