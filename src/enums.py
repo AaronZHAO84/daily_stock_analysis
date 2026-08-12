@@ -34,7 +34,7 @@ class ReportType(str, Enum):
             对应的枚举值，无效输入返回默认值 SIMPLE
         """
         try:
-            normalized = value.lower().strip()
+            normalized = value.lower().strip().replace("-", "_")
             if normalized == "detailed":
                 normalized = cls.FULL.value
             return cls(normalized)
