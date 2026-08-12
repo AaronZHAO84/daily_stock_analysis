@@ -4832,6 +4832,7 @@ This run only needs the aggregate summary plus each stock's short intelligence b
             "按同一市场的股票数据生成简短分析。只返回 JSON，不要 Markdown。"
             "格式必须为 {\"stocks\":[...]}；每只股票必须有 code、sentiment_score、"
             "trend_prediction、operation_advice、analysis_summary。analysis_summary 不超过120字；"
+            "必须为输入中的每个 code 恰好返回一个对象，不得遗漏或重复。"
             "仅列真正重要的风险、利好或动态，没有则留空数组。\n"
             + json.dumps(stock_inputs, ensure_ascii=False, default=str)
         )
@@ -4851,7 +4852,7 @@ This run only needs the aggregate summary plus each stock's short intelligence b
         if not isinstance(items, list):
             raise ValueError("batch LLM response must contain a stocks array")
         by_code = {str(item.get("code", "")).strip(): item for item in items if isinstance(item, dict)}
-        if set(by_code) != set(codes):
+        if len(items) != len(codes) or len(by_code) != len(codes) or set(by_code) != set(codes):
             raise ValueError(f"batch response codes mismatch: expected={codes}, got={sorted(by_code)}")
 
         results = []
