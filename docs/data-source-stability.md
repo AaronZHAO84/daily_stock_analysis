@@ -126,7 +126,7 @@ flowchart TD
 适合个人试用，依赖免费源自动 fallback。优点是不需要 token；缺点是更容易遇到上游限流或临时接口变化。
 
 ```env
-REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=efinance,akshare_sina,akshare_em,tencent
 ENABLE_EASTMONEY_PATCH=true
 ```
 
@@ -138,7 +138,7 @@ ENABLE_EASTMONEY_PATCH=true
 TUSHARE_TOKEN=your_tushare_token
 TICKFLOW_API_KEY=your_tickflow_key
 
-REALTIME_SOURCE_PRIORITY=tickflow,tushare,tencent,akshare_sina,efinance,akshare_em
+REALTIME_SOURCE_PRIORITY=tickflow,tushare,efinance,akshare_sina,akshare_em,tencent
 SNAPSHOT_SOURCE_PRIORITY=tushare,sina,efinance,akshare_em,em_datacenter
 
 # 选股运行期默认值；显式配置时会保留你的值
