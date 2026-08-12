@@ -697,6 +697,7 @@ class StockAnalysisPipeline:
                 portfolio_context=portfolio_context,
             )
             enhanced_context["market_phase_context"] = market_phase_context_dict
+            enhanced_context["report_type"] = report_type.value
             self._attach_daily_market_context(
                 enhanced_context,
                 daily_market_context,
@@ -3184,6 +3185,8 @@ class StockAnalysisPipeline:
         report_type_str = getattr(self.config, 'report_type', 'simple').lower()
         if report_type_str == 'brief':
             report_type = ReportType.BRIEF
+        elif report_type_str in ('summary_lite', 'summary-lite'):
+            report_type = ReportType.SUMMARY_LITE
         elif report_type_str == 'full':
             report_type = ReportType.FULL
         else:
@@ -3334,6 +3337,9 @@ class StockAnalysisPipeline:
                 elif report_type == ReportType.BRIEF:
                     report_content = self.notifier.generate_brief_report([result])
                     logger.info(f"[{stock_code}] 使用简洁报告格式")
+                elif report_type == ReportType.SUMMARY_LITE:
+                    report_content = self.notifier.generate_summary_lite_report([result])
+                    logger.info(f"[{stock_code}] 使用摘要速览报告格式")
                 else:
                     report_content = self.notifier.generate_single_stock_report(result)
                     logger.info(f"[{stock_code}] 使用精简报告格式")

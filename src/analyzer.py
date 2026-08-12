@@ -4179,6 +4179,18 @@ class GeminiAnalyzer:
 - 当数据缺失时，请使用中文直接说明“{no_data_text}，无法判断”。
 """
         
+        if str(context.get("report_type", "")).strip().lower() in {"summary_lite", "summary-lite"}:
+            prompt += """
+
+### Summary-lite output constraint
+This run only needs the aggregate summary plus each stock's short intelligence brief. Keep the JSON valid, but make output concise:
+- Keep dashboard.intelligence.sentiment_summary, earnings_outlook, risk_alerts, positive_catalysts, and latest_news.
+- risk_alerts and positive_catalysts: at most 2 concise items each.
+- dashboard.core_conclusion.one_sentence: one concise sentence.
+- Keep long narrative fields such as technical_analysis, fundamental_analysis, battle_plan, action_checklist, outlook fields, and history-style text empty or very short unless required for JSON validity.
+- Do not expand into a full detailed stock report.
+"""
+
         return prompt
     
     def _format_volume(self, volume: Optional[float]) -> str:

@@ -20,6 +20,7 @@ class ReportType(str, Enum):
     SIMPLE = "simple"  # 精简报告：使用 generate_single_stock_report
     FULL = "full"      # 完整报告：使用 generate_dashboard_report
     BRIEF = "brief"    # 简洁模式：3-5 句话概括，适合移动端/推送
+    SUMMARY_LITE = "summary_lite"  # Summary + per-stock intelligence brief
 
     @classmethod
     def from_str(cls, value: str) -> "ReportType":
@@ -33,7 +34,7 @@ class ReportType(str, Enum):
             对应的枚举值，无效输入返回默认值 SIMPLE
         """
         try:
-            normalized = value.lower().strip()
+            normalized = value.lower().strip().replace("-", "_")
             if normalized == "detailed":
                 normalized = cls.FULL.value
             return cls(normalized)
@@ -47,4 +48,5 @@ class ReportType(str, Enum):
             ReportType.SIMPLE: "精简报告",
             ReportType.FULL: "完整报告",
             ReportType.BRIEF: "简洁报告",
+            ReportType.SUMMARY_LITE: "摘要速览",
         }.get(self, "精简报告")

@@ -420,6 +420,8 @@ class NotificationService(
         normalized_type = self._normalize_report_type(report_type)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
+        if normalized_type == ReportType.SUMMARY_LITE:
+            return self.generate_summary_lite_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
@@ -1222,6 +1224,83 @@ class NotificationService(
             emoji,
             signal_tag,
         )
+
+    def generate_summary_lite_report(
+        self,
+        results: List[AnalysisResult],
+        report_date: Optional[str] = None,
+    ) -> str:
+        """Generate an aggregate report with the dashboard summary and per-stock intel brief."""
+        config = get_config()
+        report_language = self._get_report_language(results)
+        labels = get_report_labels(report_language)
+        if getattr(config, 'report_renderer_enabled', False) and results:
+            from src.services.report_renderer import render
+            out = render(
+                platform='summary_lite',
+                results=results,
+                report_date=report_date,
+                summary_only=False,
+                extra_context={"report_language": report_language},
+            )
+            if out:
+                return out
+
+        if report_date is None:
+            report_date = datetime.now().strftime('%Y-%m-%d')
+
+        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        buy_count, sell_count, hold_count = self._count_display_decisions(results, report_language)
+        lines = [
+            f"# 🎯 {report_date} {labels['dashboard_title']}",
+            "",
+            f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit']} | "
+            f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
+        ]
+        self._append_market_status_line(lines, results, report_language)
+        lines.extend([f"## 📊 {labels['summary_heading']}", ""])
+
+        for result in sorted_results:
+            signal_text, signal_emoji, _ = self._get_signal_level(result)
+            display_name = self._get_display_name(result, report_language)
+            lines.append(
+                f"{signal_emoji} **{display_name}({result.code})**: "
+                f"{signal_text} | {labels['score_label']} {result.sentiment_score} | "
+                f"{localize_trend_prediction(result.trend_prediction, report_language)}"
+            )
+
+        lines.extend(["", "---", ""])
+        for result in sorted_results:
+            signal_text, signal_emoji, _ = self._get_signal_level(result)
+            stock_name = self._get_display_name(result, report_language)
+            dashboard = result.dashboard if hasattr(result, 'dashboard') and result.dashboard else {}
+            intel = dashboard.get('intelligence', {}) if dashboard else {}
+            lines.extend([f"## {signal_emoji} {stock_name} ({result.code})", "", f"### 📰 {labels['info_heading']}", ""])
+            if intel.get('sentiment_summary'):
+                lines.append(f"**💭 {labels['sentiment_summary_label']}**: {intel['sentiment_summary']}")
+            if intel.get('earnings_outlook'):
+                lines.append(f"**📊 {labels['earnings_outlook_label']}**: {intel['earnings_outlook']}")
+            risk_alerts = intel.get('risk_alerts', []) if intel else []
+            if risk_alerts:
+                lines.extend(["", f"**🚨 {labels['risk_alerts_label']}**:"])
+                for alert in risk_alerts[:2]:
+                    lines.append(f"- {alert}")
+            catalysts = intel.get('positive_catalysts', []) if intel else []
+            if catalysts:
+                lines.extend(["", f"**✨ {labels['positive_catalysts_label']}**:"])
+                for catalyst in catalysts[:2]:
+                    lines.append(f"- {catalyst}")
+            if intel.get('latest_news'):
+                lines.extend(["", f"**📢 {labels['latest_news_label']}**: {intel['latest_news']}"])
+            if not intel:
+                lines.append(result.analysis_summary or signal_text)
+            lines.extend(["", "---", ""])
+
+        lines.append(f"*{labels['generated_at_label']}：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        models = self._collect_models_used(results)
+        if models:
+            lines.append(f"*{labels['analysis_model_label']}：{', '.join(models)}*")
+        return "\n".join(lines)
 
     def generate_dashboard_report(
         self,
