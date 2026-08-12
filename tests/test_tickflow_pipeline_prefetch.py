@@ -63,7 +63,7 @@ class TestTickFlowPipelinePrefetch(unittest.TestCase):
         )
 
         def _process(code, skip_analysis=False, single_stock_notify=False, report_type=None, analysis_query_id=None, current_time=None):
-            events.append(("process", code))
+            events.append(("process", code, analysis_query_id))
             return _make_result(code)
 
         pipeline.process_single_stock = MagicMock(side_effect=_process)
@@ -81,6 +81,7 @@ class TestTickFlowPipelinePrefetch(unittest.TestCase):
         self.assertEqual(events[2][0], "name_prefetch")
         self.assertTrue(all(event[0] != "process" for event in events[:3]))
         self.assertEqual([event[0] for event in events[3:]], ["process"] * 5)
+        self.assertEqual(len({event[2] for event in events[3:]}), 5)
 
 
 if __name__ == "__main__":

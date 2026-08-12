@@ -26,6 +26,16 @@ def test_split_market_batches_never_mixes_markets():
     ]
 
 
+def test_split_market_batches_does_not_wait_for_interleaved_market_codes():
+    batches = split_market_batches(["002001", "hk09992", "688103"], batch_size=2)
+
+    assert batches == [
+        ("cn", ["002001"]),
+        ("hk", ["hk09992"]),
+        ("cn", ["688103"]),
+    ]
+
+
 def test_batch_json_validator_accepts_a_stocks_envelope():
     analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
 
