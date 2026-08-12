@@ -98,11 +98,62 @@ from src.core.trading_calendar import (
     get_market_now,
     is_market_open,
 )
+from src.core.analysis_batching import split_market_batches
 from data_provider.us_index_mapping import is_us_stock_code
 from bot.models import BotMessage
 
 
 logger = logging.getLogger(__name__)
+
+
+class _MarketBatchCoordinator:
+    """Collect prepared same-market contexts and execute one LLM call per batch."""
+
+    def __init__(self, analyzer, batches, timeout_seconds=90):
+        self.analyzer = analyzer
+        self.expected = {key: set(codes) for key, codes in batches.items()}
+        self.pending = defaultdict(dict)
+        self.results = {}
+        self.conditions = {key: threading.Condition() for key in batches}
+        self.timeout_seconds = timeout_seconds
+
+    def analyze(self, batch_key, code, context, news_context, pack_summary):
+        condition = self.conditions[batch_key]
+        with condition:
+            self.pending[batch_key][code] = (context, news_context, pack_summary)
+            deadline = time.monotonic() + self.timeout_seconds
+            if set(self.pending[batch_key]) == self.expected[batch_key]:
+                items = self.pending[batch_key]
+                try:
+                    batch_contexts = [items[item][0] for item in self.expected[batch_key]]
+                    news = {item: items[item][1] for item in items if items[item][1]}
+                    summaries = {item: items[item][2] for item in items if items[item][2]}
+                    results = self.analyzer.analyze_market_batch(
+                        batch_contexts,
+                        news_contexts=news,
+                        analysis_context_pack_summaries=summaries,
+                    )
+                    self.results[batch_key] = {result.code: result for result in results}
+                    logger.info("[llm-batch] market=%s stocks=%d", batch_key[0], len(results))
+                except Exception as exc:
+                    logger.warning("[llm-batch] failed, falling back to individual calls: %s", exc)
+                    self.results[batch_key] = {}
+                condition.notify_all()
+            else:
+                while set(self.pending[batch_key]) != self.expected[batch_key]:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        logger.warning("[llm-batch] timed out, falling back to individual calls: %s", batch_key)
+                        break
+                    condition.wait(timeout=remaining)
+            result = self.results.get(batch_key, {}).get(code)
+            if result is not None:
+                return result
+        return self.analyzer.analyze(
+            context,
+            news_context=news_context,
+            analysis_context_pack_summary=pack_summary,
+        )
 
 
 def _share_image_payload(result: Any) -> Optional[Dict[str, Any]]:
@@ -408,6 +459,7 @@ class StockAnalysisPipeline:
         report_type: ReportType,
         query_id: str,
         current_time: Optional[datetime] = None,
+        analysis_runner: Optional[Callable[..., AnalysisResult]] = None,
     ) -> Optional[AnalysisResult]:
         """
         分析单只股票（增强版：含量比、换手率、筹码分析、多维度情报）
@@ -756,13 +808,21 @@ class StockAnalysisPipeline:
                     model=getattr(self.config, "litellm_model", None),
                     call_type="analysis",
                 )
-                result = self.analyzer.analyze(
-                    enhanced_context,
-                    news_context=news_context,
-                    progress_callback=self._emit_progress,
-                    stream_progress_callback=_on_llm_stream,
-                    analysis_context_pack_summary=analysis_context_pack_summary,
-                )
+                if analysis_runner is None:
+                    result = self.analyzer.analyze(
+                        enhanced_context,
+                        news_context=news_context,
+                        progress_callback=self._emit_progress,
+                        stream_progress_callback=_on_llm_stream,
+                        analysis_context_pack_summary=analysis_context_pack_summary,
+                    )
+                else:
+                    result = analysis_runner(
+                        code=code,
+                        context=enhanced_context,
+                        news_context=news_context,
+                        analysis_context_pack_summary=analysis_context_pack_summary,
+                    )
                 llm_duration_ms = int((time.monotonic() - llm_started_at) * 1000)
                 record_llm_run(
                     success=bool(result and getattr(result, "success", True)),
@@ -3029,6 +3089,7 @@ class StockAnalysisPipeline:
         report_type: ReportType = ReportType.SIMPLE,
         analysis_query_id: Optional[str] = None,
         current_time: Optional[datetime] = None,
+        analysis_runner: Optional[Callable[..., AnalysisResult]] = None,
     ) -> Optional[AnalysisResult]:
         """
         处理单只股票的完整流程
@@ -3088,7 +3149,15 @@ class StockAnalysisPipeline:
             analyze_kwargs = {"query_id": effective_query_id}
             if current_time is not None:
                 analyze_kwargs["current_time"] = current_time
-            result = self.analyze_stock(code, report_type, **analyze_kwargs)
+            if analysis_runner is None:
+                result = self.analyze_stock(code, report_type, **analyze_kwargs)
+            else:
+                result = self.analyze_stock(
+                    code,
+                    report_type,
+                    analysis_runner=analysis_runner,
+                    **analyze_kwargs,
+                )
             
             if result and result.success:
                 logger.info(
@@ -3206,20 +3275,69 @@ class StockAnalysisPipeline:
             )
         
         results: List[AnalysisResult] = []
+
+        # Fast/summary-lite use small same-market LLM batches. Full reports keep
+        # the established per-stock path because their prompts are intentionally
+        # larger and more heterogeneous.
+        batch_coordinator = None
+        code_batch_keys = {}
+        if not dry_run and report_type_str in ("fast", "summary_lite", "summary-lite"):
+            configured_batch_size = max(1, int(getattr(self.config, "llm_batch_size", 3) or 3))
+            batch_size = min(configured_batch_size, max(1, self.max_workers))
+            if batch_size != configured_batch_size:
+                logger.info(
+                    "[llm-batch] reducing batch size from %d to %d to match max_workers=%d",
+                    configured_batch_size,
+                    batch_size,
+                    self.max_workers,
+                )
+            batch_specs = split_market_batches(stock_codes, batch_size=batch_size)
+            batch_members = {}
+            for index, (market, codes) in enumerate(batch_specs):
+                key = (market, index)
+                batch_members[key] = codes
+                for code in codes:
+                    code_batch_keys[code] = key
+            batch_coordinator = _MarketBatchCoordinator(
+                self.analyzer,
+                batch_members,
+                timeout_seconds=max(30, int(getattr(self.config, "analysis_timeout", 90) or 90)),
+            )
+            logger.info("[llm-batch] planned %d same-market batches: %s", len(batch_specs), batch_specs)
+
+        def _analysis_runner(*, code, context, news_context, analysis_context_pack_summary):
+            if batch_coordinator is None or code not in code_batch_keys:
+                return self.analyzer.analyze(
+                    context,
+                    news_context=news_context,
+                    analysis_context_pack_summary=analysis_context_pack_summary,
+                )
+            return batch_coordinator.analyze(
+                code_batch_keys[code],
+                code,
+                context,
+                news_context,
+                analysis_context_pack_summary,
+            )
         
         # 使用线程池并发处理
         # 注意：max_workers 设置较低（默认3）以避免触发反爬
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            submit_kwargs = {
+                "skip_analysis": dry_run,
+                "single_stock_notify": False,
+                "analysis_query_id": uuid.uuid4().hex,
+                "current_time": resume_reference_time,
+            }
+            if batch_coordinator is not None:
+                submit_kwargs["analysis_runner"] = _analysis_runner
             # 提交任务
             future_to_code = {
                 executor.submit(
                     self.process_single_stock,
                     code,
-                    skip_analysis=dry_run,
-                    single_stock_notify=False,
+                    **submit_kwargs,
                     report_type=report_type,  # Issue #119: 传递报告类型
-                    analysis_query_id=uuid.uuid4().hex,
-                    current_time=resume_reference_time,
                 ): code
                 for code in stock_codes
             }

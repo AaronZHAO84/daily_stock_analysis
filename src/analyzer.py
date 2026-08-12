@@ -4773,6 +4773,78 @@ This run only needs the aggregate summary plus each stock's short intelligence b
         
         return results
 
+    def analyze_market_batch(
+        self,
+        contexts: List[Dict[str, Any]],
+        news_contexts: Optional[Dict[str, str]] = None,
+        analysis_context_pack_summaries: Optional[Dict[str, str]] = None,
+    ) -> List[AnalysisResult]:
+        """Analyze a small batch of stocks from one market in one LLM request.
+
+        The caller is responsible for grouping symbols by market.  The response
+        is deliberately keyed by stock code so a missing item can be detected
+        and the caller can fall back to individual analysis safely.
+        """
+        if not contexts:
+            return []
+        from src.core.analysis_batching import group_stock_codes
+
+        codes = [str(context.get("code", "")).strip() for context in contexts]
+        if len(set(codes)) != len(codes) or len(group_stock_codes(codes)) != 1:
+            raise ValueError("analyze_market_batch requires unique same-market symbols")
+
+        config = self._get_runtime_config()
+        language = normalize_report_language(getattr(config, "report_language", "zh"))
+        sections = []
+        for context in contexts:
+            code = context.get("code", "Unknown")
+            name = context.get("stock_name") or STOCK_NAME_MAP.get(code, f"股票{code}")
+            prompt = self._format_prompt(
+                context,
+                name,
+                (news_contexts or {}).get(code),
+                report_language=language,
+                analysis_context_pack_summary=(analysis_context_pack_summaries or {}).get(code),
+            )
+            sections.append(f"### STOCK {code} ({name})\n{prompt}")
+
+        batch_prompt = (
+            "You are analyzing a same-market stock batch. Return JSON only, with "
+            "the exact shape {\"stocks\":[{...single-stock-analysis-fields...}]} . "
+            "Return exactly one object for every requested code; preserve each "
+            "code in the code field and do not merge stocks.\n\n"
+            + "\n\n".join(sections)
+        )
+        result = self._call_litellm(
+            batch_prompt,
+            {"temperature": config.llm_temperature, "max_output_tokens": 8192 * len(contexts)},
+            system_prompt=self._get_analysis_system_prompt(language, stock_code="batch"),
+            stream=False,
+            response_validator=self._validate_json_response,
+        )
+        response_text = result[0] if isinstance(result, tuple) else result
+        data = json.loads(response_text)
+        items = data.get("stocks") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("batch LLM response must contain a stocks array")
+        by_code = {str(item.get("code", "")).strip(): item for item in items if isinstance(item, dict)}
+        if set(by_code) != set(codes):
+            raise ValueError(f"batch response codes mismatch: expected={codes}, got={sorted(by_code)}")
+
+        results = []
+        for context in contexts:
+            code = str(context.get("code", "")).strip()
+            name = context.get("stock_name") or STOCK_NAME_MAP.get(code, f"股票{code}")
+            item_text = json.dumps(by_code[code], ensure_ascii=False)
+            parsed = self._parse_response(item_text, code, name)
+            parsed.raw_response = item_text
+            parsed.search_performed = bool((news_contexts or {}).get(code))
+            parsed.market_snapshot = self._build_market_snapshot(context)
+            parsed.model_used = result[1] if isinstance(result, tuple) else None
+            parsed.report_language = language
+            results.append(parsed)
+        return results
+
 
 # 便捷函数
 def get_analyzer() -> GeminiAnalyzer:
