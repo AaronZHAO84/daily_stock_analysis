@@ -32,10 +32,31 @@ def group_stock_codes(stock_codes: Iterable[str]) -> Dict[str, List[str]]:
 def split_market_batches(
     stock_codes: Iterable[str], batch_size: int = 3
 ) -> List[Tuple[str, List[str]]]:
-    """Split symbols into same-market batches, preserving market and symbol order."""
+    """Split adjacent same-market symbols without blocking the worker queue.
+
+    Keeping batches contiguous means two early tasks can never wait for a
+    same-market partner that is still queued behind another market's task.
+    """
     size = max(1, int(batch_size))
     batches: List[Tuple[str, List[str]]] = []
-    for market, codes in group_stock_codes(stock_codes).items():
-        for start in range(0, len(codes), size):
-            batches.append((market, codes[start : start + size]))
+    current_market = None
+    current_codes: List[str] = []
+    seen = set()
+
+    def flush() -> None:
+        if current_codes:
+            batches.append((current_market, list(current_codes)))
+
+    for code in stock_codes:
+        value = str(code or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        market = _market_for_code(value)
+        if current_codes and (market != current_market or len(current_codes) >= size):
+            flush()
+            current_codes.clear()
+        current_market = market
+        current_codes.append(value)
+    flush()
     return batches

@@ -3326,7 +3326,6 @@ class StockAnalysisPipeline:
             submit_kwargs = {
                 "skip_analysis": dry_run,
                 "single_stock_notify": False,
-                "analysis_query_id": uuid.uuid4().hex,
                 "current_time": resume_reference_time,
             }
             if batch_coordinator is not None:
@@ -3337,6 +3336,7 @@ class StockAnalysisPipeline:
                     self.process_single_stock,
                     code,
                     **submit_kwargs,
+                    analysis_query_id=uuid.uuid4().hex,
                     report_type=report_type,  # Issue #119: 传递报告类型
                 ): code
                 for code in stock_codes
