@@ -4351,7 +4351,8 @@ class SearchService:
         self,
         stock_code: str,
         stock_name: str,
-        max_searches: int = 3
+        max_searches: int = 3,
+        allow_public_searxng: bool = True,
     ) -> Dict[str, SearchResponse]:
         """
         多维度情报搜索（同时使用多个引擎、多个维度）
@@ -4514,7 +4515,17 @@ class SearchService:
                 break
             
             # 选择搜索引擎（轮流使用）
-            available_providers = [p for p in self._providers if p.is_available]
+            available_providers = [
+                p for p in self._providers
+                if p.is_available
+                and (
+                    allow_public_searxng
+                    or not (
+                        isinstance(p, SearXNGSearchProvider)
+                        and bool(getattr(p, "_use_public_instances", False))
+                    )
+                )
+            ]
             if not available_providers:
                 break
             
