@@ -11,9 +11,10 @@ on:
       mode:
         description: '运行模式'
         required: true
-        default: 'full'
+        default: 'fast'
         type: choice
         options:
+          - fast           # 快速摘要（行情+近期重要信息）
           - full          # 完整分析（股票+大盘）
           - summary-lite  # 摘要速览（整体摘要 + 每股重要信息速览）
           - market-only   # 仅大盘复盘
@@ -407,7 +408,7 @@ jobs:
           # ==========================================
           # 运行配置 ⬅️ 新增！
           # ==========================================
-          REPORT_TYPE: ${{ github.event.inputs.mode == 'summary-lite' && 'summary_lite' || github.event.inputs.mode == 'full' && 'full' || vars.DAILY_ANALYSIS_MODE == 'summary-lite' && 'summary_lite' || vars.DAILY_ANALYSIS_MODE == 'full' && 'full' || vars.REPORT_TYPE || secrets.REPORT_TYPE || 'summary_lite' }}
+          REPORT_TYPE: ${{ github.event.inputs.mode == 'fast' && 'fast' || github.event.inputs.mode == 'summary-lite' && 'summary_lite' || github.event.inputs.mode == 'full' && 'full' || vars.DAILY_ANALYSIS_MODE == 'fast' && 'fast' || vars.DAILY_ANALYSIS_MODE == 'summary-lite' && 'summary_lite' || vars.DAILY_ANALYSIS_MODE == 'full' && 'full' || vars.REPORT_TYPE || secrets.REPORT_TYPE || 'fast' }}
           REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || '' }}
           REPORT_SHOW_LLM_MODEL: ${{ vars.REPORT_SHOW_LLM_MODEL || secrets.REPORT_SHOW_LLM_MODEL || 'true' }}
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
@@ -419,7 +420,8 @@ jobs:
           # 系统配置
           # ==========================================
           LOG_LEVEL: INFO
-          MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
+          # fast 模式默认三路并发；如数据源限流，可在 Repository variables 改回 1 或设为 2
+          MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '3' }}
           # 筹码分布：默认 false（云端接口不稳定）；需启用时在 Settings → Variables 添加 ENABLE_CHIP_DISTRIBUTION=true
           ENABLE_CHIP_DISTRIBUTION: ${{ vars.ENABLE_CHIP_DISTRIBUTION || secrets.ENABLE_CHIP_DISTRIBUTION || 'false' }}
           # 实时行情数据源优先级（腾讯有量比且稳定，推荐首选）
@@ -449,7 +451,7 @@ jobs:
           fi
 
           # 判断运行模式
-          MODE="${{ github.event.inputs.mode || vars.DAILY_ANALYSIS_MODE || 'summary-lite' }}"
+          MODE="${{ github.event.inputs.mode || vars.DAILY_ANALYSIS_MODE || 'fast' }}"
           
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"
@@ -529,7 +531,7 @@ jobs:
           # 执行分析
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
-          elif [ "$MODE" = "summary-lite" ]; then
+          elif [ "$MODE" = "fast" ] || [ "$MODE" = "summary-lite" ]; then
             python main.py --no-market-review $FORCE_RUN_ARG
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review $FORCE_RUN_ARG

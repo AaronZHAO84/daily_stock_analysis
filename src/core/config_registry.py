@@ -2522,7 +2522,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "REPORT_TYPE": {
         "title": "Report Type",
-        "description": "Report format: 'simple' (concise), 'full' (detailed), 'brief' (3-5 sentences), or 'summary_lite' (summary + per-stock brief).",
+        "description": "Report format: 'simple' (concise), 'full' (detailed), 'brief' (3-5 sentences), 'summary_lite' (summary + per-stock brief), or 'fast' (summary + material per-stock events only).",
         "category": "notification",
         "data_type": "string",
         "ui_control": "select",
@@ -2530,14 +2530,15 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_required": False,
         "is_editable": True,
         "default_value": "simple",
-        "options": ["simple", "full", "brief", "summary_lite"],
-        "validation": {"enum": ["simple", "full", "brief", "summary_lite"]},
+        "options": ["simple", "full", "brief", "summary_lite", "fast"],
+        "validation": {"enum": ["simple", "full", "brief", "summary_lite", "fast"]},
         "display_order": 55,
         "help_key": "settings.notification.report_output",
         "examples": [
             "REPORT_TYPE=simple",
             "REPORT_TYPE=full",
             "REPORT_TYPE=summary_lite",
+            "REPORT_TYPE=fast",
             "REPORT_LANGUAGE=zh",
         ],
         "docs": [

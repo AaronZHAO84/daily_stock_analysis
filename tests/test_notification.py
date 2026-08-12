@@ -822,6 +822,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
             self.assertEqual(service.generate_aggregate_report([result], "brief"), "brief")
             with mock.patch.object(service, "generate_summary_lite_report", return_value="summary-lite") as mock_summary_lite:
                 self.assertEqual(service.generate_aggregate_report([result], "summary_lite"), "summary-lite")
+                self.assertEqual(service.generate_aggregate_report([result], "fast"), "summary-lite")
                 self.assertEqual(service.generate_aggregate_report([result], "summary-lite"), "summary-lite")
 
         self.assertEqual(mock_dashboard.call_count, 3)

@@ -21,6 +21,7 @@ class ReportType(str, Enum):
     FULL = "full"      # 完整报告：使用 generate_dashboard_report
     BRIEF = "brief"    # 简洁模式：3-5 句话概括，适合移动端/推送
     SUMMARY_LITE = "summary_lite"  # Summary + per-stock intelligence brief
+    FAST = "fast"  # Fast summary with only material stock intelligence
 
     @classmethod
     def from_str(cls, value: str) -> "ReportType":
@@ -49,4 +50,5 @@ class ReportType(str, Enum):
             ReportType.FULL: "完整报告",
             ReportType.BRIEF: "简洁报告",
             ReportType.SUMMARY_LITE: "摘要速览",
+            ReportType.FAST: "快速摘要",
         }.get(self, "精简报告")

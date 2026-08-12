@@ -20,6 +20,9 @@
 {% set intel = dashboard.get('intelligence') or {} %}
 ## {{ e.signal_emoji }} {{ e.stock_name }} ({{ result.code }})
 
+{% if not e.has_material_intelligence %}
+暂无重大新增信息，维持原有观点。
+{% else %}
 ### 📰 {{ labels.info_heading }}
 
 {% if intel.get('sentiment_summary') %}
@@ -48,6 +51,7 @@
 {% endif %}
 {% if not intel %}
 {{ result.analysis_summary }}
+{% endif %}
 {% endif %}
 
 ---

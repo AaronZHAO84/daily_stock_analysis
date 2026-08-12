@@ -111,6 +111,38 @@ class TestReportRenderer(unittest.TestCase):
         self.assertNotIn("Ignored third catalyst", out)
         self.assertNotIn("battle plan", out.lower())
 
+    def test_render_summary_lite_omits_low_signal_stock_details(self) -> None:
+        quiet = _make_result(
+            code="QUIET",
+            name="Quiet Corp",
+            dashboard={
+                "intelligence": {
+                    "sentiment_summary": "近期情绪平稳。",
+                    "earnings_outlook": "暂无新的业绩变化。",
+                    "latest_news": "常规行情更新。",
+                },
+            },
+        )
+        material = _make_result(
+            code="MATERIAL",
+            name="Material Corp",
+            dashboard={
+                "intelligence": {
+                    "risk_alerts": ["公司公告重要减持计划"],
+                    "positive_catalysts": ["获得重大订单"],
+                },
+            },
+        )
+
+        out = render("summary_lite", [quiet, material], summary_only=False)
+
+        self.assertIsNotNone(out)
+        self.assertIn("暂无重大新增信息", out)
+        self.assertNotIn("近期情绪平稳", out)
+        self.assertNotIn("常规行情更新", out)
+        self.assertIn("公司公告重要减持计划", out)
+        self.assertIn("获得重大订单", out)
+
     def test_render_markdown_preserves_guardrailed_neutral_action(self) -> None:
         r = _make_result(
             dashboard={
