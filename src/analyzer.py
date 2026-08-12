@@ -4843,7 +4843,7 @@ This run only needs the aggregate summary plus each stock's short intelligence b
                 "max_output_tokens": min(4096, max(1200, 900 * len(contexts))),
             },
             system_prompt="You are a concise stock-analysis assistant. Return valid JSON only.",
-            stream=False,
+            stream=True,
             response_validator=self._validate_batch_json_response,
         )
         response_text = result[0] if isinstance(result, tuple) else result
