@@ -4179,7 +4179,7 @@ class GeminiAnalyzer:
 - 当数据缺失时，请使用中文直接说明“{no_data_text}，无法判断”。
 """
         
-        if str(context.get("report_type", "")).strip().lower() in {"summary_lite", "summary-lite"}:
+        if str(context.get("report_type", "")).strip().lower() in {"summary_lite", "summary-lite", "fast"}:
             prompt += """
 
 ### Summary-lite output constraint

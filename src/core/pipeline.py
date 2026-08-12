@@ -602,21 +602,23 @@ class StockAnalysisPipeline:
 
             # Step 4: 多维度情报搜索（最新消息+风险排查+业绩预期）
             news_context = None
+            configured_report_type = str(getattr(self.config, "report_type", "") or "").strip().lower()
             persisted_intelligence_context = self._load_persisted_intelligence_context(
                 code=code,
                 stock_name=stock_name,
                 market=market or "cn",
+                limit=3 if configured_report_type == "fast" else 6,
             )
             news_result_count: Optional[int] = None
             self._emit_progress(46, f"{stock_name}：正在检索新闻与舆情")
             if self.search_service is not None and self.search_service.is_available:
                 logger.info(f"{stock_name}({code}) 开始多维度情报搜索...")
 
-                # 使用多维度搜索（最多5次搜索）
+                # fast 模式只保留少量近期信息，降低来源请求和模型输入量。
                 intel_results = self.search_service.search_comprehensive_intel(
                     stock_code=code,
                     stock_name=stock_name,
-                    max_searches=5
+                    max_searches=2 if configured_report_type == "fast" else 5
                 )
 
                 # 格式化情报报告
@@ -697,7 +699,8 @@ class StockAnalysisPipeline:
                 portfolio_context=portfolio_context,
             )
             enhanced_context["market_phase_context"] = market_phase_context_dict
-            enhanced_context["report_type"] = report_type.value
+            configured_report_type = str(getattr(self.config, "report_type", "") or "").strip().lower()
+            enhanced_context["report_type"] = "fast" if configured_report_type == "fast" else report_type.value
             self._attach_daily_market_context(
                 enhanced_context,
                 daily_market_context,
@@ -1345,7 +1348,7 @@ class StockAnalysisPipeline:
             initial_context = {
                 "stock_code": code,
                 "stock_name": stock_name,
-                "report_type": report_type.value,
+                "report_type": "fast" if str(getattr(self.config, "report_type", "") or "").strip().lower() == "fast" else report_type.value,
                 "report_language": report_language,
                 "fundamental_context": fundamental_context,
             }
@@ -2760,7 +2763,8 @@ class StockAnalysisPipeline:
         try:
             service = IntelligenceService(config=self.config)
             service.refresh_auto_sources()
-            days = max(1, int(self.config.get_effective_news_window_days() or 1))
+            configured_report_type = str(getattr(self.config, "report_type", "") or "").strip().lower()
+            days = 2 if configured_report_type == "fast" else max(1, int(self.config.get_effective_news_window_days() or 1))
             collected: list[Dict[str, Any]] = []
             seen_urls: set[str] = set()
             symbol_filters = [
@@ -3185,7 +3189,7 @@ class StockAnalysisPipeline:
         report_type_str = getattr(self.config, 'report_type', 'simple').lower()
         if report_type_str == 'brief':
             report_type = ReportType.BRIEF
-        elif report_type_str in ('summary_lite', 'summary-lite'):
+        elif report_type_str in ('summary_lite', 'summary-lite', 'fast'):
             report_type = ReportType.SUMMARY_LITE
         elif report_type_str == 'full':
             report_type = ReportType.FULL

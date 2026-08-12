@@ -420,7 +420,7 @@ class NotificationService(
         normalized_type = self._normalize_report_type(report_type)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
-        if normalized_type == ReportType.SUMMARY_LITE:
+        if normalized_type in (ReportType.SUMMARY_LITE, ReportType.FAST):
             return self.generate_summary_lite_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
 

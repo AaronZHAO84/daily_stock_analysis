@@ -138,6 +138,22 @@ def render(
     # Build template context with pre-computed signal levels (sorted by score)
     sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
     sorted_enriched = []
+
+    def has_material_intelligence(result: AnalysisResult) -> bool:
+        dashboard = getattr(result, "dashboard", None) or {}
+        intel = dashboard.get("intelligence") or {}
+        risks = [str(x).strip() for x in (intel.get("risk_alerts") or []) if str(x).strip()]
+        catalysts = [str(x).strip() for x in (intel.get("positive_catalysts") or []) if str(x).strip()]
+        earnings = str(intel.get("earnings_outlook") or "").strip()
+        latest = str(intel.get("latest_news") or "").strip()
+        neutral_markers = ("暂无", "没有重大", "常规行情", "无重大", "无明显", "近期平稳")
+        return bool(
+            risks
+            or catalysts
+            or (earnings and not any(marker in earnings for marker in neutral_markers))
+            or (latest and not any(marker in latest for marker in neutral_markers))
+        )
+
     for r in sorted_results:
         display_action = display_action_fields_for_result(
             r,
@@ -166,6 +182,7 @@ def render(
             "stock_name": _escape_md(rn),
             "localized_operation_advice": display_advice,
             "localized_trend_prediction": localize_trend_prediction(r.trend_prediction, report_language),
+            "has_material_intelligence": has_material_intelligence(r),
         })
 
     display_buckets = [
