@@ -34,7 +34,7 @@ This document compiles common issues encountered by users and their solutions.
 1. Fixed in v2.3.0, Tencent interface now supports volume ratio parsing
 2. Recommended real-time quote source priority:
    ```bash
-   REALTIME_SOURCE_PRIORITY=efinance,akshare_sina,akshare_em,tencent
+   REALTIME_SOURCE_PRIORITY=akshare_sina,tencent
    ```
 3. System has built-in 5-day average volume calculation as fallback
 

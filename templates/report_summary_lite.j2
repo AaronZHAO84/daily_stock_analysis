@@ -12,17 +12,16 @@
 {{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})**: {{ e.signal_text }} | {{ labels.score_label }} {{ e.result.sentiment_score }} | {{ e.localized_trend_prediction }}
 {% endfor %}
 
+{% set material_enriched = enriched | selectattr('has_material_intelligence') | list %}
+{% if material_enriched %}
 ---
 
-{% for e in enriched %}
+{% for e in material_enriched %}
 {% set result = e.result %}
 {% set dashboard = result.dashboard if result.dashboard else {} %}
 {% set intel = dashboard.get('intelligence') or {} %}
 ## {{ e.signal_emoji }} {{ e.stock_name }} ({{ result.code }})
 
-{% if not e.has_material_intelligence %}
-暂无重大新增信息，维持原有观点。
-{% else %}
 ### 📰 {{ labels.info_heading }}
 
 {% if intel.get('sentiment_summary') %}
@@ -52,11 +51,11 @@
 {% if not intel %}
 {{ result.analysis_summary }}
 {% endif %}
-{% endif %}
 
 ---
 
 {% endfor %}
+{% endif %}
 *{{ labels.generated_at_label }}：{{ report_timestamp }}*
 {% if show_llm_model and models_used %}
 *{{ labels.analysis_model_label }}：{{ models_used|join(', ') }}*

@@ -84,8 +84,8 @@ class _Quote:
         return True
 
 
-class _EfinanceRealtimeFetcher(BaseFetcher):
-    name = "EfinanceFetcher"
+class _AkshareSinaRealtimeFetcher(BaseFetcher):
+    name = "AkshareFetcher"
     priority = 0
 
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -172,10 +172,10 @@ class RunDiagnosticsP1TestCase(unittest.TestCase):
         self.assertEqual(runs[1]["record_count"], 1)
 
     def test_realtime_quote_provider_run_records_success(self) -> None:
-        manager = DataFetcherManager(fetchers=[_EfinanceRealtimeFetcher()])
+        manager = DataFetcherManager(fetchers=[_AkshareSinaRealtimeFetcher()])
         config = SimpleNamespace(
             enable_realtime_quote=True,
-            realtime_source_priority="efinance",
+            realtime_source_priority="akshare_sina",
         )
         token = activate_run_diagnostic_context(
             trace_id="trace-realtime",
@@ -194,7 +194,7 @@ class RunDiagnosticsP1TestCase(unittest.TestCase):
         runs = snapshot["provider_runs"]
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["data_type"], "realtime_quote")
-        self.assertEqual(runs[0]["provider"], "EfinanceFetcher")
+        self.assertEqual(runs[0]["provider"], "AkshareFetcher")
         self.assertTrue(runs[0]["success"])
 
     def test_record_provider_run_sanitizes_sensitive_text(self) -> None:

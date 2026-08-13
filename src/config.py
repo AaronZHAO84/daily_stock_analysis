@@ -1210,12 +1210,12 @@ class Config:
     # 东财接口补丁开关
     enable_eastmoney_patch: bool = False
     # 实时行情数据源优先级（逗号分隔）
-    # 推荐顺序：efinance > akshare_sina > akshare_em > tencent
-    # - efinance: 东方财富，A股字段较完整；海外 runner 失败后快速 fallback
+    # 推荐顺序：akshare_sina > tencent
     # - akshare_sina: 新浪财经，基本行情稳定，但无量比
-    # - akshare_em: 东方财富备用接口；tencent: 腾讯财经最后兜底
+    # - tencent: 腾讯财经，单股查询且适合云端执行
+    # - A股默认不使用 efinance/akshare_em（均依赖东方财富接口）
     # - tushare: Tushare Pro，需要2000积分，数据全面（付费用户可优先使用）
-    realtime_source_priority: str = "efinance,akshare_sina,akshare_em,tencent"
+    realtime_source_priority: str = "akshare_sina,tencent"
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -2925,7 +2925,7 @@ class Config:
         so that the paid data source is utilized for realtime quotes as well.
         """
         explicit = os.getenv('REALTIME_SOURCE_PRIORITY')
-        default_priority = 'efinance,akshare_sina,akshare_em,tencent'
+        default_priority = 'akshare_sina,tencent'
 
         if explicit:
             # User explicitly set priority, respect it

@@ -33,11 +33,29 @@ class _DummyFetcher:
         self.priority = priority
         self._result = result
         self._error = error
+        self.calls = []
 
     def get_realtime_quote(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         if self._error is not None:
             raise self._error
         return self._result
+
+
+class _SourceAwareAkshareFetcher:
+    """Models Sina failure with Tencent succeeding through the same fetcher."""
+
+    name = "AkshareFetcher"
+    priority = 0
+
+    def __init__(self):
+        self.calls = []
+
+    def get_realtime_quote(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        if kwargs.get("source") == "sina":
+            raise RuntimeError("sina unavailable")
+        return _make_quote(source=RealtimeSource.TENCENT)
 
 
 def _make_quote(
@@ -98,12 +116,12 @@ def _make_pipeline(enable_realtime_quote: bool, realtime_quote=None) -> StockAna
 def test_manager_does_not_warn_when_fallback_source_succeeds(mock_get_config, caplog):
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
-        realtime_source_priority="efinance,akshare_em",
+        realtime_source_priority="tushare,akshare_sina",
     )
     manager = DataFetcherManager(
         fetchers=[
-            _DummyFetcher("EfinanceFetcher", 0, error=RuntimeError("efinance timeout")),
-            _DummyFetcher("AkshareFetcher", 1, result=_make_quote()),
+            _DummyFetcher("TushareFetcher", 0, error=RuntimeError("tushare timeout")),
+            _DummyFetcher("AkshareFetcher", 1, result=_make_quote(source=RealtimeSource.AKSHARE_SINA)),
         ]
     )
 
@@ -113,22 +131,66 @@ def test_manager_does_not_warn_when_fallback_source_succeeds(mock_get_config, ca
     assert quote is not None
     assert quote.name == "贵州茅台"
     assert quote.fetched_at is not None
-    assert quote.fallback_from == "efinance"
+    assert quote.fallback_from == "tushare"
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert "所有数据源均不可用" not in caplog.text
+
+
+@patch("src.config.get_config")
+def test_manager_excludes_eastmoney_realtime_sources_for_a_shares(mock_get_config):
+    mock_get_config.return_value = SimpleNamespace(
+        enable_realtime_quote=True,
+        realtime_source_priority="efinance,akshare_em,akshare_sina,tencent",
+    )
+    efinance = _DummyFetcher(
+        "EfinanceFetcher", 0, result=_make_quote(source=RealtimeSource.EFINANCE)
+    )
+    akshare = _DummyFetcher(
+        "AkshareFetcher", 1, result=_make_quote(source=RealtimeSource.AKSHARE_SINA)
+    )
+    manager = DataFetcherManager(fetchers=[efinance, akshare])
+
+    quote = manager.get_realtime_quote("600519")
+
+    assert quote is not None
+    assert quote.source == RealtimeSource.AKSHARE_SINA
+    assert efinance.calls == []
+    assert akshare.calls == [(("600519",), {"source": "sina"})]
+
+
+@patch("src.config.get_config")
+def test_manager_skips_failed_cn_realtime_source_for_remaining_run(mock_get_config):
+    """A failed source is tried once, then later stocks go straight to fallback."""
+    mock_get_config.return_value = SimpleNamespace(
+        enable_realtime_quote=True,
+        realtime_source_priority="akshare_sina,tencent",
+    )
+    akshare = _SourceAwareAkshareFetcher()
+    manager = DataFetcherManager(fetchers=[akshare])
+
+    first = manager.get_realtime_quote("600519")
+    second = manager.get_realtime_quote("000001")
+
+    assert first is not None
+    assert second is not None
+    assert akshare.calls == [
+        (("600519",), {"source": "sina"}),
+        (("600519",), {"source": "tencent"}),
+        (("000001",), {"source": "tencent"}),
+    ]
 
 
 @patch("src.config.get_config")
 def test_manager_supplement_does_not_mark_fallback_from(mock_get_config):
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
-        realtime_source_priority="efinance,akshare_em",
+        realtime_source_priority="tushare,akshare_sina",
     )
-    primary = _make_quote(source=RealtimeSource.EFINANCE)
-    supplement = _make_quote(source=RealtimeSource.AKSHARE_EM, volume_ratio=1.7)
+    primary = _make_quote(source=RealtimeSource.TUSHARE)
+    supplement = _make_quote(source=RealtimeSource.AKSHARE_SINA, volume_ratio=1.7)
     manager = DataFetcherManager(
         fetchers=[
-            _DummyFetcher("EfinanceFetcher", 0, result=primary),
+            _DummyFetcher("TushareFetcher", 0, result=primary),
             _DummyFetcher("AkshareFetcher", 1, result=supplement),
         ]
     )
@@ -138,7 +200,7 @@ def test_manager_supplement_does_not_mark_fallback_from(mock_get_config):
     assert quote is primary
     assert quote.fetched_at is not None
     assert quote.fallback_from is None
-    assert quote.source == RealtimeSource.EFINANCE
+    assert quote.source == RealtimeSource.TUSHARE
     assert quote.volume_ratio == 1.7
 
 
@@ -146,21 +208,20 @@ def test_manager_supplement_does_not_mark_fallback_from(mock_get_config):
 def test_manager_fallback_from_records_highest_priority_failed_source(mock_get_config):
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
-        realtime_source_priority="efinance,tushare,akshare_em",
+        realtime_source_priority="tushare,akshare_sina",
     )
     manager = DataFetcherManager(
         fetchers=[
-            _DummyFetcher("EfinanceFetcher", 0, error=RuntimeError("efinance timeout")),
-            _DummyFetcher("TushareFetcher", 1, error=RuntimeError("tushare timeout")),
-            _DummyFetcher("AkshareFetcher", 2, result=_make_quote()),
+            _DummyFetcher("TushareFetcher", 0, error=RuntimeError("tushare timeout")),
+            _DummyFetcher("AkshareFetcher", 1, result=_make_quote(source=RealtimeSource.AKSHARE_SINA)),
         ]
     )
 
     quote = manager.get_realtime_quote("600519")
 
     assert quote is not None
-    assert quote.source == RealtimeSource.AKSHARE_EM
-    assert quote.fallback_from == "efinance"
+    assert quote.source == RealtimeSource.AKSHARE_SINA
+    assert quote.fallback_from == "tushare"
     assert quote.fetched_at is not None
 
 
@@ -168,16 +229,16 @@ def test_manager_fallback_from_records_highest_priority_failed_source(mock_get_c
 def test_manager_drops_invalid_provider_timestamp_before_return(mock_get_config):
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
-        realtime_source_priority="efinance",
+        realtime_source_priority="akshare_sina",
         realtime_cache_ttl=600,
     )
     raw_quote = _make_quote(
-        source=RealtimeSource.EFINANCE,
+        source=RealtimeSource.AKSHARE_SINA,
         provider_timestamp="not-a-date",
     )
     manager = DataFetcherManager(
         fetchers=[
-            _DummyFetcher("EfinanceFetcher", 0, result=raw_quote),
+            _DummyFetcher("AkshareFetcher", 0, result=raw_quote),
         ]
     )
 

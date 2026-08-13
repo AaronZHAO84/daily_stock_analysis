@@ -163,7 +163,7 @@ class TestFetcherSourceOptimization(unittest.TestCase):
             efinance = MagicMock()
             efinance.name = "EfinanceFetcher"
             efinance.priority = 0
-            efinance.get_daily_data.side_effect = RuntimeError("temporary failure")
+            efinance.get_daily_data.return_value = _make_daily_df()
 
             akshare = MagicMock()
             akshare.name = "AkshareFetcher"
@@ -188,7 +188,7 @@ class TestFetcherSourceOptimization(unittest.TestCase):
                 manager.available_fetchers,
                 ["EfinanceFetcher", "AkshareFetcher", "TencentFetcher"],
             )
-            efinance.get_daily_data.assert_called_once()
+            efinance.get_daily_data.assert_not_called()
             akshare.get_daily_data.assert_called_once()
             tencent.get_daily_data.assert_not_called()
         finally:

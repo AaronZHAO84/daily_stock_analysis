@@ -137,9 +137,11 @@ class TestReportRenderer(unittest.TestCase):
         out = render("summary_lite", [quiet, material], summary_only=False)
 
         self.assertIsNotNone(out)
-        self.assertIn("暂无重大新增信息", out)
+        self.assertNotIn("暂无重大新增信息", out)
+        self.assertNotIn("## 🟡 Quiet Corp (QUIET)", out)
         self.assertNotIn("近期情绪平稳", out)
         self.assertNotIn("常规行情更新", out)
+        self.assertIn("## 🟡 Material Corp (MATERIAL)", out)
         self.assertIn("公司公告重要减持计划", out)
         self.assertIn("获得重大订单", out)
 
