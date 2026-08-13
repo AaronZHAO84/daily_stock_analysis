@@ -150,6 +150,11 @@ def test_manager_excludes_eastmoney_realtime_sources_for_a_shares(mock_get_confi
             source=RealtimeSource.AKSHARE_SINA,
             volume_ratio=1.0,
             turnover_rate=1.0,
+            pe_ratio=10.0,
+            pb_ratio=2.0,
+            total_mv=1000.0,
+            circ_mv=800.0,
+            amplitude=1.0,
         )
     )
     manager = DataFetcherManager(fetchers=[efinance, akshare])

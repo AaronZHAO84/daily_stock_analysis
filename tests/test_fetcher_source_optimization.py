@@ -350,7 +350,7 @@ class TestFetcherSourceOptimization(unittest.TestCase):
         DataFetcherManager.reset_daily_source_health()
         try:
             flaky = MagicMock()
-            flaky.name = "EfinanceFetcher"
+            flaky.name = "AkshareFetcher"
             flaky.priority = 0
             flaky.get_daily_data.side_effect = RuntimeError("timeout")
 
