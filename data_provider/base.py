@@ -30,7 +30,6 @@ from src.services.market_symbol_utils import is_suffix_market_symbol
 from src.services.run_diagnostics import record_provider_run, record_provider_run_started
 from .fundamental_adapter import AkshareFundamentalAdapter
 from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
-from .realtime_types import CircuitBreaker
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -628,11 +627,53 @@ class DataFetcherManager:
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
     }
-    _daily_source_health = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
     _CONCEPT_RANKINGS_CACHE_TTL_SECONDS = 300.0
     _CONCEPT_RANKINGS_EMPTY_CACHE_TTL_SECONDS = 30.0
     _concept_rankings_cache_lock = RLock()
     _concept_rankings_cache: Dict[int, Tuple[float, List[Dict], List[Dict]]] = {}
+    @classmethod
+    def reset_daily_source_health(cls) -> None:
+        """Compatibility no-op: daily-source skips are scoped to each manager instance."""
+        return None
+
+    @staticmethod
+    def _daily_source_key(fetcher: BaseFetcher, market: str) -> str:
+        return f"daily_data:{market}:{fetcher.name}"
+
+    def _should_attempt_daily_source(self, fetcher: BaseFetcher, market: str) -> bool:
+        key = self._daily_source_key(fetcher, market)
+        with self._daily_source_skip_lock:
+            skipped = key in self._daily_sources_skipped_this_run
+        if skipped:
+            logger.info(
+                "[数据源跳过] %s 日线源本轮已失败，不再重试: %s",
+                market,
+                fetcher.name,
+            )
+            return False
+        return True
+
+    def _skip_daily_source_after_failure(self, fetcher: BaseFetcher, market: str) -> None:
+        key = self._daily_source_key(fetcher, market)
+        with self._daily_source_skip_lock:
+            self._daily_sources_skipped_this_run.add(key)
+
+    @staticmethod
+    def _realtime_source_key(source: str) -> str:
+        aliases = {"akshare_qq": "tencent"}
+        return aliases.get((source or "").strip().lower(), (source or "").strip().lower())
+
+    def _should_attempt_realtime_source(self, source: str) -> bool:
+        self._ensure_concurrency_guards()
+        key = self._realtime_source_key(source)
+        with self._realtime_source_skip_lock:
+            return key not in self._realtime_sources_skipped_this_run
+
+    def _skip_realtime_source_after_failure(self, source: str) -> None:
+        self._ensure_concurrency_guards()
+        key = self._realtime_source_key(source)
+        with self._realtime_source_skip_lock:
+            self._realtime_sources_skipped_this_run.add(key)
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
         """
@@ -646,6 +687,10 @@ class DataFetcherManager:
         self._fetchers_by_name: Dict[str, BaseFetcher] = {}
         self._fetcher_call_locks: Dict[int, RLock] = {}
         self._fetcher_call_locks_lock = RLock()
+        self._daily_source_skip_lock = RLock()
+        self._daily_sources_skipped_this_run: set[str] = set()
+        self._realtime_source_skip_lock = RLock()
+        self._realtime_sources_skipped_this_run: set[str] = set()
         self._stock_name_cache: Dict[str, str] = {}
         self._stock_name_cache_lock = RLock()
         
@@ -676,6 +721,14 @@ class DataFetcherManager:
             self._fetcher_call_locks = {}
         if not hasattr(self, "_fetcher_call_locks_lock") or self._fetcher_call_locks_lock is None:
             self._fetcher_call_locks_lock = RLock()
+        if not hasattr(self, "_daily_source_skip_lock") or self._daily_source_skip_lock is None:
+            self._daily_source_skip_lock = RLock()
+        if not hasattr(self, "_daily_sources_skipped_this_run") or self._daily_sources_skipped_this_run is None:
+            self._daily_sources_skipped_this_run = set()
+        if not hasattr(self, "_realtime_source_skip_lock") or self._realtime_source_skip_lock is None:
+            self._realtime_source_skip_lock = RLock()
+        if not hasattr(self, "_realtime_sources_skipped_this_run") or self._realtime_sources_skipped_this_run is None:
+            self._realtime_sources_skipped_this_run = set()
         if not hasattr(self, "_stock_name_cache") or self._stock_name_cache is None:
             self._stock_name_cache = {}
         if not hasattr(self, "_stock_name_cache_lock") or self._stock_name_cache_lock is None:
@@ -796,43 +849,6 @@ class DataFetcherManager:
             )
 
         return kept
-
-    @classmethod
-    def _daily_health_key(cls, fetcher: BaseFetcher, market: str) -> str:
-        return f"daily_data:{market}:{fetcher.name}"
-
-    @classmethod
-    def _is_daily_source_available(
-        cls,
-        fetcher: BaseFetcher,
-        market: str,
-    ) -> bool:
-        key = cls._daily_health_key(fetcher, market)
-        if cls._daily_source_health.is_available(key):
-            return True
-        logger.info(
-            "[数据源健康度] %s 日线跳过短期熔断的数据源: %s",
-            market,
-            fetcher.name,
-        )
-        return False
-
-    @staticmethod
-    def _daily_source_unavailable_error(fetcher: BaseFetcher) -> str:
-        return f"[{fetcher.name}] (CircuitOpen) 数据源短期熔断"
-
-    @classmethod
-    def _record_daily_source_success(cls, fetcher: BaseFetcher, market: str) -> None:
-        cls._daily_source_health.record_success(cls._daily_health_key(fetcher, market))
-
-    @classmethod
-    def _record_daily_source_failure(cls, fetcher: BaseFetcher, market: str, error: str) -> None:
-        cls._daily_source_health.record_failure(cls._daily_health_key(fetcher, market), error=error)
-
-    @classmethod
-    def reset_daily_source_health(cls) -> None:
-        """Reset daily source health state for tests/admin diagnostics."""
-        cls._daily_source_health.reset()
 
     def _get_cached_stock_name(self, stock_code: str) -> Optional[str]:
         self._ensure_concurrency_guards()
@@ -1147,13 +1163,9 @@ class DataFetcherManager:
         - 如果配置了 TUSHARE_TOKEN：实例化 TushareFetcher，并按其内部逻辑提升优先级
         - 如果配置了 Longbridge OAuth 或 Legacy 凭据：实例化 LongbridgeFetcher 作为美股/港股兜底
         - 未配置的可选数据源不实例化，避免在批量拉取时反复探测无效源
-        - 默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
-          1. AkshareFetcher (Priority 1)
-          2. PytdxFetcher (Priority 2) - 通达信
-          3. BaostockFetcher (Priority 3)
-          4. YfinanceFetcher (Priority 4)
-          5. TencentFetcher (Priority 5) - A 股最终兜底
+        - 实例优先级由各 Fetcher 自身配置决定；普通 A 股日线在
+          ``get_daily_data`` 中会避开 Efinance（东方财富），由 AkShare
+          新浪、腾讯及其他可用源按顺序尝试。
         """
         from src.config import get_config
         from .efinance_fetcher import EfinanceFetcher
@@ -1292,7 +1304,12 @@ class DataFetcherManager:
         is_kr = (not is_us) and (not is_hk) and _is_kr_market(stock_code)
         is_tw = (not is_us) and (not is_hk) and _is_tw_market(stock_code)
         market = "us" if is_us else "hk" if is_hk else "jp" if is_jp else "kr" if is_kr else "tw" if is_tw else "cn"
-        if market != "cn":
+        if market == "cn" and not _is_etf_code(stock_code):
+            fetchers = [
+                fetcher for fetcher in fetchers
+                if fetcher.name != "EfinanceFetcher"
+            ]
+        else:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")
         total_fetchers = len(fetchers)
@@ -1326,8 +1343,8 @@ class DataFetcherManager:
                 for attempt, fetcher in enumerate(fetchers, start=1):
                     if fetcher.name != src_name:
                         continue
-                    if not self._is_daily_source_available(fetcher, market):
-                        errors.append(self._daily_source_unavailable_error(fetcher))
+                    if not self._should_attempt_daily_source(fetcher, market):
+                        errors.append(f"[{fetcher.name}] (SkippedAfterFailure) 本轮已跳过")
                         break
                     attempt_start = time.time()
                     try:
@@ -1364,7 +1381,6 @@ class DataFetcherManager:
                                 f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
                                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
                             )
-                            self._record_daily_source_success(fetcher, market)
                             return df, fetcher.name
                         duration_ms = int((time.time() - attempt_start) * 1000)
                         record_provider_run(
@@ -1378,8 +1394,7 @@ class DataFetcherManager:
                             fallback_to=fallback_to,
                             record_count=0,
                         )
-                        if df is not None and df.empty:
-                            self._record_daily_source_success(fetcher, market)
+                        self._skip_daily_source_after_failure(fetcher, market)
                     except Exception as e:
                         error_type, error_reason = summarize_exception(e)
                         error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1398,7 +1413,7 @@ class DataFetcherManager:
                             f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                             f"error_type={error_type}, reason={error_reason}"
                         )
-                        self._record_daily_source_failure(fetcher, market, error_reason)
+                        self._skip_daily_source_after_failure(fetcher, market)
                         errors.append(error_msg)
                     break
 
@@ -1408,8 +1423,8 @@ class DataFetcherManager:
             raise DataFetchError(error_summary)
 
         for attempt, fetcher in enumerate(fetchers, start=1):
-            if not self._is_daily_source_available(fetcher, market):
-                errors.append(self._daily_source_unavailable_error(fetcher))
+            if not self._should_attempt_daily_source(fetcher, market):
+                errors.append(f"[{fetcher.name}] (SkippedAfterFailure) 本轮已跳过")
                 continue
             attempt_start = time.time()
             fallback_to = fetchers[attempt].name if attempt < total_fetchers else None
@@ -1444,7 +1459,6 @@ class DataFetcherManager:
                         f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
                         f"rows={len(df)}, elapsed={elapsed:.2f}s"
                     )
-                    self._record_daily_source_success(fetcher, market)
                     return df, fetcher.name
                 duration_ms = int((time.time() - attempt_start) * 1000)
                 record_provider_run(
@@ -1458,9 +1472,7 @@ class DataFetcherManager:
                     fallback_to=fallback_to,
                     record_count=0,
                 )
-                if df is not None and df.empty:
-                    self._record_daily_source_success(fetcher, market)
-
+                self._skip_daily_source_after_failure(fetcher, market)
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
                 error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1479,7 +1491,7 @@ class DataFetcherManager:
                     f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                     f"error_type={error_type}, reason={error_reason}"
                 )
-                self._record_daily_source_failure(fetcher, market, error_reason)
+                self._skip_daily_source_after_failure(fetcher, market)
                 errors.append(error_msg)
                 if attempt < total_fetchers:
                     next_fetcher = fetchers[attempt]
@@ -1728,11 +1740,11 @@ class DataFetcherManager:
         
         故障切换策略（按配置的优先级）：
         1. 美股：使用 YfinanceFetcher.get_realtime_quote()
-        2. EfinanceFetcher.get_realtime_quote()
-        3. AkshareFetcher.get_realtime_quote(source="em")  - 东财
-        4. AkshareFetcher.get_realtime_quote(source="sina") - 新浪
-        5. AkshareFetcher.get_realtime_quote(source="tencent") - 腾讯
-        6. 返回 None（降级兜底）
+        2. A 股默认：AkshareFetcher(source="sina") -> Tencent
+        3. 可选付费源：TickFlow / Tushare（显式配置时）
+        4. 返回 None（降级兜底）
+
+        A 股运行时会忽略 efinance / akshare_em，避免云端访问东方财富。
         
         Args:
             stock_code: 股票代码
@@ -1828,6 +1840,11 @@ class DataFetcherManager:
             for source in config.realtime_source_priority.split(',')
             if source.strip()
         ]
+        disabled_cn_sources = {"efinance", "akshare_em"}
+        source_priority = [
+            source for source in source_priority
+            if source not in disabled_cn_sources
+        ]
         
         errors = []
         failed_sources: List[str] = []
@@ -1837,6 +1854,9 @@ class DataFetcherManager:
         primary_fallback_from: Optional[str] = None
         
         for source_index, source in enumerate(source_priority):
+            if not self._should_attempt_realtime_source(source):
+                logger.debug(f"[实时行情] {stock_code} 跳过本轮已失败数据源: {source}")
+                continue
             attempt_start = time.time()
             fallback_to = source_priority[source_index + 1] if source_index + 1 < len(source_priority) else None
             fetcher = None
@@ -1956,6 +1976,7 @@ class DataFetcherManager:
                     )
                     if primary_quote is None:
                         failed_sources.append(source)
+                    self._skip_realtime_source_after_failure(source)
                     
             except Exception as e:
                 error_msg = f"[{source}] 失败: {str(e)}"
@@ -1974,6 +1995,7 @@ class DataFetcherManager:
                 errors.append(error_msg)
                 if primary_quote is None:
                     failed_sources.append(source)
+                self._skip_realtime_source_after_failure(source)
                 continue
         
         # Return primary even if some fields are still missing

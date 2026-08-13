@@ -17,8 +17,8 @@
 
 | 场景 | 已接入源 | 默认使用方式 | 失败处理 |
 | --- | --- | --- | --- |
-| A 股日线 / 技术面 | Efinance、Tencent、AkShare、Tushare、Pytdx、Baostock、YFinance | `DataFetcherManager` 按优先级尝试；配置 `TUSHARE_TOKEN` 后 Tushare 自动进入候选源 | 单源失败后尝试下一个源；连续失败会短期熔断该源 |
-| A 股实时行情 | Tencent、AkShare Sina、Efinance、AkShare EM、Tushare | `REALTIME_SOURCE_PRIORITY` 控制顺序，默认偏向 Tencent / Sina 这类轻量源 | 失败源记录 `fallback_from`，成功源继续返回 |
+| A 股日线 / 技术面 | AkShare Sina、Tencent、Tushare、Pytdx、Baostock、YFinance | `DataFetcherManager` 按优先级尝试；配置 `TUSHARE_TOKEN` 后 Tushare 自动进入候选源 | 单源失败后立刻尝试下一个源；同一 manager 实例内不再重复尝试该失败源 |
+| A 股实时行情 | AkShare Sina、Tencent、Tushare、TickFlow | `REALTIME_SOURCE_PRIORITY` 控制顺序，默认使用 Sina -> Tencent；运行时排除东方财富源 | 失败源记录 `fallback_from`，成功源继续返回 |
 | A 股大盘复盘 | TickFlow、AkShare、Tushare、Efinance | 配置 `TICKFLOW_API_KEY` 后，主指数和市场宽度优先尝试 TickFlow | TickFlow 权限不足或失败时回退 AkShare / Tushare / Efinance 链路 |
 | 选股快照 | Tushare、Sina、Efinance、AkShare EM、EastMoney Datacenter | 有 `TUSHARE_TOKEN` 时自动把 `tushare` 放入快照优先级；否则使用免费源链路 | 选股引擎维护 source health；状态接口透出 snapshot/daily health |
 | 选股日线补特征 | `DataFetcherManager` | 选股引擎优先复用现有日线与缓存链路 | 现有链路失败后才回到引擎自身的日线源 |
@@ -44,7 +44,7 @@ flowchart TD
     DM -->|美股| US[Longbridge/YFinance -> Finnhub/AlphaVantage -> Stooq]
 
     R --> RP[REALTIME_SOURCE_PRIORITY]
-    RP --> RS[Tencent -> AkShare Sina -> Efinance -> AkShare EM]
+    RP --> RS[AkShare Sina -> Tencent]
     RP --> RT[Tushare can be placed first when token/points are available]
 
     A --> AS[Snapshot: Tushare/Sina/Efinance/AkShare EM/EM Datacenter]
@@ -126,8 +126,7 @@ flowchart TD
 适合个人试用，依赖免费源自动 fallback。优点是不需要 token；缺点是更容易遇到上游限流或临时接口变化。
 
 ```env
-REALTIME_SOURCE_PRIORITY=efinance,akshare_sina,akshare_em,tencent
-ENABLE_EASTMONEY_PATCH=true
+REALTIME_SOURCE_PRIORITY=akshare_sina,tencent
 ```
 
 ### A 股稳定模式
@@ -138,7 +137,7 @@ ENABLE_EASTMONEY_PATCH=true
 TUSHARE_TOKEN=your_tushare_token
 TICKFLOW_API_KEY=your_tickflow_key
 
-REALTIME_SOURCE_PRIORITY=tickflow,tushare,efinance,akshare_sina,akshare_em,tencent
+REALTIME_SOURCE_PRIORITY=tickflow,tushare,akshare_sina,tencent
 SNAPSHOT_SOURCE_PRIORITY=tushare,sina,efinance,akshare_em,em_datacenter
 
 # 选股运行期默认值；显式配置时会保留你的值

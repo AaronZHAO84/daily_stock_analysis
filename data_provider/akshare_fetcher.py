@@ -498,13 +498,11 @@ class AkshareFetcher(BaseFetcher):
         获取普通 A 股历史数据
 
         策略：
-        1. 优先尝试东方财富接口 (ak.stock_zh_a_hist)
-        2. 失败后尝试新浪财经接口 (ak.stock_zh_a_daily)
-        3. 最后尝试腾讯财经接口 (ak.stock_zh_a_hist_tx)
+        1. 优先尝试新浪财经接口 (ak.stock_zh_a_daily)
+        2. 失败后尝试腾讯财经接口 (ak.stock_zh_a_hist_tx)
         """
         # 尝试列表
         methods = [
-            (self._fetch_stock_data_em, "东方财富"),
             (self._fetch_stock_data_sina, "新浪财经"),
             (self._fetch_stock_data_tx, "腾讯财经"),
         ]

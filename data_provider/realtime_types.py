@@ -306,11 +306,13 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 3,       # 连续失败次数阈值
         cooldown_seconds: float = 300.0,  # 冷却时间（秒），默认5分钟
-        half_open_max_calls: int = 1      # 半开状态最大尝试次数
+        half_open_max_calls: int = 1,     # 半开状态最大尝试次数
+        enabled: bool = True,
     ):
         self.failure_threshold = failure_threshold
         self.cooldown_seconds = cooldown_seconds
         self.half_open_max_calls = half_open_max_calls
+        self.enabled = enabled
         
         # 各数据源状态 {source_name: {state, failures, last_failure_time, half_open_calls}}
         self._states: Dict[str, Dict[str, Any]] = {}
@@ -334,6 +336,8 @@ class CircuitBreaker:
         返回 True 表示可以尝试请求
         返回 False 表示应跳过该数据源
         """
+        if not self.enabled:
+            return True
         with self._lock:
             state = self._get_state_locked(source)
             current_time = time.time()
@@ -379,6 +383,8 @@ class CircuitBreaker:
         仅影响 HALF_OPEN 状态：将其转回 OPEN 以便冷却后重新探测。
         CLOSED 状态下为空操作，不影响失败计数。
         """
+        if not self.enabled:
+            return
         with self._lock:
             state = self._get_state_locked(source)
             if state['state'] == self.HALF_OPEN:
@@ -389,6 +395,8 @@ class CircuitBreaker:
 
     def record_success(self, source: str) -> None:
         """记录成功请求"""
+        if not self.enabled:
+            return
         with self._lock:
             state = self._get_state_locked(source)
 
@@ -403,6 +411,8 @@ class CircuitBreaker:
     
     def record_failure(self, source: str, error: Optional[str] = None) -> None:
         """记录失败请求"""
+        if not self.enabled:
+            return
         with self._lock:
             state = self._get_state_locked(source)
             current_time = time.time()
@@ -440,9 +450,7 @@ class CircuitBreaker:
 
 # 全局熔断器实例（实时行情专用）
 _realtime_circuit_breaker = CircuitBreaker(
-    failure_threshold=3,      # 连续失败3次熔断
-    cooldown_seconds=300.0,   # 冷却5分钟
-    half_open_max_calls=1
+    enabled=False,
 )
 
 # 筹码接口熔断器（更保守的策略，因为该接口更不稳定）

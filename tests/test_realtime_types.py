@@ -5,7 +5,12 @@ import threading
 import time
 import unittest
 
-from data_provider.realtime_types import CircuitBreaker, RealtimeSource, UnifiedRealtimeQuote
+from data_provider.realtime_types import (
+    CircuitBreaker,
+    RealtimeSource,
+    UnifiedRealtimeQuote,
+    get_realtime_circuit_breaker,
+)
 
 
 class UnifiedRealtimeQuoteMetadataTestCase(unittest.TestCase):
@@ -44,6 +49,15 @@ class UnifiedRealtimeQuoteMetadataTestCase(unittest.TestCase):
 
 
 class CircuitBreakerConcurrencyTestCase(unittest.TestCase):
+    def test_global_realtime_breaker_does_not_apply_cooldown(self):
+        """Daily analysis must not wait five minutes before trying the next source."""
+        breaker = get_realtime_circuit_breaker()
+        breaker.reset()
+        for _ in range(3):
+            breaker.record_failure("akshare_sina", "network")
+
+        self.assertTrue(breaker.is_available("akshare_sina"))
+
     def test_half_open_allows_only_one_concurrent_probe(self):
         breaker = CircuitBreaker(
             failure_threshold=1,

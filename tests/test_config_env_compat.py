@@ -154,7 +154,7 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
         self.assertIsNone(config.tickflow_api_key)
         self.assertEqual(
             config.realtime_source_priority,
-            "efinance,akshare_sina,akshare_em,tencent",
+            "akshare_sina,tencent",
         )
 
     @patch("src.config.setup_env")

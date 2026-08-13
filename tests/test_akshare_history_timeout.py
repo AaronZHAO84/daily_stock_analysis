@@ -190,11 +190,18 @@ def test_sina_and_tencent_history_calls_use_timeout_wrapper(
     assert list(df.columns)[:7] == ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额"]
 
 
-def test_stock_data_falls_back_after_sina_timeout(monkeypatch) -> None:
+def test_stock_data_uses_sina_then_tencent_without_eastmoney(monkeypatch) -> None:
     fetcher = AkshareFetcher(sleep_min=0, sleep_max=0)
     tx_df = pd.DataFrame({"日期": ["2026-05-25"], "收盘": [10.2]})
 
-    monkeypatch.setattr(fetcher, "_fetch_stock_data_em", lambda *args: pd.DataFrame())
+    eastmoney_called = False
+
+    def eastmoney(*args):
+        nonlocal eastmoney_called
+        eastmoney_called = True
+        raise AssertionError("A-share history must not call Eastmoney")
+
+    monkeypatch.setattr(fetcher, "_fetch_stock_data_em", eastmoney)
     monkeypatch.setattr(
         fetcher,
         "_fetch_stock_data_sina",
@@ -205,3 +212,4 @@ def test_stock_data_falls_back_after_sina_timeout(monkeypatch) -> None:
     result = fetcher._fetch_stock_data("605218", "2026-05-01", "2026-05-25")
 
     assert result is tx_df
+    assert eastmoney_called is False
