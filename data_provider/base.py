@@ -1304,7 +1304,7 @@ class DataFetcherManager:
         is_kr = (not is_us) and (not is_hk) and _is_kr_market(stock_code)
         is_tw = (not is_us) and (not is_hk) and _is_tw_market(stock_code)
         market = "us" if is_us else "hk" if is_hk else "jp" if is_jp else "kr" if is_kr else "tw" if is_tw else "cn"
-        if market == "cn":
+        if market == "cn" and not _is_etf_code(stock_code):
             fetchers = [
                 fetcher for fetcher in fetchers
                 if fetcher.name != "EfinanceFetcher"

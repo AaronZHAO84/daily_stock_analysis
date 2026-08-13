@@ -94,7 +94,7 @@ class _AkshareSinaRealtimeFetcher(BaseFetcher):
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         raise NotImplementedError
 
-    def get_realtime_quote(self, stock_code):
+    def get_realtime_quote(self, stock_code, **kwargs):
         return _Quote()
 
 

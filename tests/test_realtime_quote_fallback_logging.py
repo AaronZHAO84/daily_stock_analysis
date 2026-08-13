@@ -146,7 +146,11 @@ def test_manager_excludes_eastmoney_realtime_sources_for_a_shares(mock_get_confi
         "EfinanceFetcher", 0, result=_make_quote(source=RealtimeSource.EFINANCE)
     )
     akshare = _DummyFetcher(
-        "AkshareFetcher", 1, result=_make_quote(source=RealtimeSource.AKSHARE_SINA)
+        "AkshareFetcher", 1, result=_make_quote(
+            source=RealtimeSource.AKSHARE_SINA,
+            volume_ratio=1.0,
+            turnover_rate=1.0,
+        )
     )
     manager = DataFetcherManager(fetchers=[efinance, akshare])
 
@@ -274,11 +278,11 @@ def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_
 
     mock_get_config.return_value = SimpleNamespace(
         enable_realtime_quote=True,
-        realtime_source_priority="efinance",
+        realtime_source_priority="tushare",
     )
     manager = DataFetcherManager(
         fetchers=[
-            _DummyFetcher("EfinanceFetcher", 0, error=RuntimeError("efinance timeout")),
+            _DummyFetcher("TushareFetcher", 0, error=RuntimeError("tushare timeout")),
         ]
     )
     monitor = EventMonitor()
@@ -293,7 +297,7 @@ def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_
         result = asyncio.run(monitor._check_price(rule))
 
     assert result is None
-    assert "[实时行情] 600519 所有数据源均失败: [efinance] 失败: efinance timeout" in caplog.text
+    assert "[实时行情] 600519 所有数据源均失败: [tushare] 失败: tushare timeout" in caplog.text
 
 
 def test_pipeline_logs_disabled_realtime_once_without_fetching_quote(caplog):
